@@ -25,7 +25,7 @@
     * { box-sizing: border-box; }
     body {
       margin: 0 !important;
-      padding: 0 !important;
+      padding: 16px !important;
       min-height: 100vh;
       background: #000 !important;
       font-family: 'Nunito', sans-serif;
@@ -33,7 +33,7 @@
       flex-direction: column !important;
       align-items: center !important;
       justify-content: center !important;
-      overflow-x: hidden !important;
+      overflow-y: auto !important;
     }
     h1 {
       color: #fff;
@@ -45,15 +45,21 @@
     #bird-drawer-app {
       background: #fff;
       border-radius: 16px;
-      padding: 20px;
+      padding: 16px;
       box-shadow: 0 4px 24px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06);
-      display: inline-block;
+      width: min(800px, calc(100vw - 32px));
     }
-    #canvas-container { line-height: 0; }
+    #canvas-container {
+      line-height: 0;
+      width: 100%;
+    }
     #bird-drawer-app canvas {
       border-radius: 10px;
       display: block;
+      width: 100% !important;
+      height: auto !important;
       box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+      touch-action: none; /* prevent scroll/zoom while drawing */
     }
     #palette-area {
       margin-top: 16px;
@@ -313,6 +319,11 @@ function mouseReleased() {
   }
   currentStroke = null;
 }
+
+// Prevent page scroll/zoom while drawing on mobile
+function touchStarted() { return false; }
+function touchMoved()   { return false; }
+function touchEnded()   { return false; }
 
 function keyPressed() {
   if (key === 's') saveBird();
