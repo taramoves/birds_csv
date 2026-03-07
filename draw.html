@@ -8,6 +8,19 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyBRxxdcFF4UVQ2zucqFEPkQB4epljALWUQ",
+      authDomain: "birdworld-fb290.firebaseapp.com",
+      projectId: "birdworld-fb290",
+      storageBucket: "birdworld-fb290.firebasestorage.app",
+      messagingSenderId: "415521944886",
+      appId: "1:415521944886:web:aab5851395ee972047af97",
+      databaseURL: "https://birdworld-fb290-default-rtdb.firebaseio.com"
+    });
+  </script>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -315,7 +328,7 @@ function saveBird() {
   wingStrokes.forEach(s => density += s.points.length);
 
   const birdData = { bodyStrokes, wingStrokes, density };
-  localStorage.setItem("bird_" + Date.now(), JSON.stringify(birdData));
+  firebase.database().ref('birds').push(birdData);
 
   // Visual feedback on the button
   saveBtn.html("Saved ✓");

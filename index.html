@@ -10,6 +10,19 @@
     canvas:not(#shader-bg) { position: fixed !important; top: 0 !important; left: 0 !important; z-index: 1 !important; }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyBRxxdcFF4UVQ2zucqFEPkQB4epljALWUQ",
+      authDomain: "birdworld-fb290.firebaseapp.com",
+      projectId: "birdworld-fb290",
+      storageBucket: "birdworld-fb290.firebasestorage.app",
+      messagingSenderId: "415521944886",
+      appId: "1:415521944886:web:aab5851395ee972047af97",
+      databaseURL: "https://birdworld-fb290-default-rtdb.firebaseio.com"
+    });
+  </script>
 </head>
 <body>
 
@@ -143,7 +156,6 @@ function setup() {
   createCanvas(window.innerWidth, window.innerHeight);
   frameRate(30);
   loadBirds();
-  setInterval(loadBirds, 5000);
 }
 
 function draw() {
@@ -155,13 +167,13 @@ function draw() {
 }
 
 function loadBirds() {
-  for (let key in localStorage) {
-    if (key.startsWith("bird_") && !knownKeys.has(key)) {
-      let data = JSON.parse(localStorage.getItem(key));
-      birds.push(new Bird(data, key));
+  firebase.database().ref('birds').on('child_added', (snapshot) => {
+    const key = snapshot.key;
+    if (!knownKeys.has(key)) {
+      birds.push(new Bird(snapshot.val(), key));
       knownKeys.add(key);
     }
-  }
+  });
 }
 
 function mousePressed(event) {
@@ -174,7 +186,7 @@ function mousePressed(event) {
     if (d < hitR && d < closestDist) { closest = b; closestDist = d; }
   }
   if (closest) {
-    localStorage.removeItem(closest.storageKey);
+    firebase.database().ref('birds').child(closest.storageKey).remove();
     knownKeys.delete(closest.storageKey);
     birds.splice(birds.indexOf(closest), 1);
   }
