@@ -272,7 +272,12 @@ class Bird {
     this.wingBuffer.noFill();
     this.wingBuffer.strokeCap(ROUND);
     data.wingStrokes.forEach(s => {
-      const pts = s.points.map(p => ({ x: p.x - 400, y: p.y - 315 }));
+      // Normalize both zones to left side (x<=0); display() mirrors for right side
+      const pts = s.points.map(p => {
+        let x = p.x - 400;
+        if (x > 0) x = -x;
+        return { x, y: p.y - 315 };
+      });
       this.wingBuffer.stroke(s.color);
       this.wingBuffer.strokeWeight(s.size);
       this.wingBuffer.beginShape();
@@ -287,7 +292,11 @@ class Bird {
     this.wingShadowBuffer.noFill();
     this.wingShadowBuffer.strokeCap(ROUND);
     data.wingStrokes.forEach(s => {
-      const pts = s.points.map(p => ({ x: p.x - 400, y: p.y - 315 }));
+      const pts = s.points.map(p => {
+        let x = p.x - 400;
+        if (x > 0) x = -x;
+        return { x, y: p.y - 315 };
+      });
       this.wingShadowBuffer.stroke(0, 0, 0, 70);
       this.wingShadowBuffer.strokeWeight(s.size);
       this.wingShadowBuffer.beginShape();
