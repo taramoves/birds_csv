@@ -111,6 +111,7 @@ const COLORS = (() => {
 })();
 
 let colorBtns = [];
+let saveBtn;
 
 function setup() {
   let canvas = createCanvas(800, 630);
@@ -313,18 +314,18 @@ function saveBird() {
   bodyStrokes.forEach(s => density += s.points.length);
   wingStrokes.forEach(s => density += s.points.length);
 
-  const birdData = {
-    bodyStrokes,
-    wingStrokes,
-    density
-  };
+  const birdData = { bodyStrokes, wingStrokes, density };
+  localStorage.setItem("bird_" + Date.now(), JSON.stringify(birdData));
 
-  localStorage.setItem(
-    "bird_" + Date.now(),
-    JSON.stringify(birdData)
-  );
+  // Visual feedback on the button
+  saveBtn.html("Saved ✓");
+  saveBtn.style("background", "#2a7a2a");
+  setTimeout(() => {
+    saveBtn.html("Save (S)");
+    saveBtn.style("background", "#111");
+  }, 1800);
 
-  alert("Bird saved locally!");
+  refreshCanvas();
 }
 
 function undoStroke() {
@@ -380,7 +381,7 @@ function createPalette() {
   refreshBtn.addClass('action-btn');
   refreshBtn.mousePressed(refreshCanvas);
 
-  let saveBtn = createButton("Save (S)");
+  saveBtn = createButton("Save (S)");
   saveBtn.parent(palette);
   saveBtn.addClass('action-btn');
   saveBtn.mousePressed(saveBird);
