@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>Draw a Bird</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,7 +25,7 @@
     * { box-sizing: border-box; }
     body {
       margin: 0 !important;
-      padding: 16px !important;
+      padding: 0 !important;
       min-height: 100vh;
       background: #000 !important;
       font-family: 'Nunito', sans-serif;
@@ -33,7 +33,8 @@
       flex-direction: column !important;
       align-items: center !important;
       justify-content: center !important;
-      overflow-y: auto !important;
+      overflow: hidden !important;
+      touch-action: none;
     }
     h1 {
       color: #fff;
@@ -45,21 +46,17 @@
     #bird-drawer-app {
       background: #fff;
       border-radius: 16px;
-      padding: 16px;
+      padding: 20px;
       box-shadow: 0 4px 24px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06);
-      width: min(800px, calc(100vw - 32px));
+      display: inline-block;
     }
-    #canvas-container {
-      line-height: 0;
-      width: 100%;
-    }
+    #canvas-container { line-height: 0; }
     #bird-drawer-app canvas {
       border-radius: 10px;
       display: block;
-      width: 100% !important;
-      height: auto !important;
       box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
-      touch-action: none; /* prevent scroll/zoom while drawing */
+      max-width: 100%;
+      height: auto;
     }
     #palette-area {
       margin-top: 16px;
@@ -77,6 +74,8 @@
       cursor: pointer;
       box-shadow: 0 2px 6px rgba(0,0,0,0.18);
       transition: transform 0.15s ease, box-shadow 0.15s ease;
+      -webkit-appearance: none;
+      appearance: none;
     }
     #palette-area .color-btn:hover {
       transform: scale(1.15);
@@ -130,8 +129,11 @@ let colorBtns = [];
 let saveBtn;
 
 function setup() {
-  let canvas = createCanvas(800, 630);
+  const maxW = min(windowWidth - 40, 800);
+  const scale = maxW / 800;
+  let canvas = createCanvas(maxW, floor(630 * scale));
   canvas.parent('canvas-container');
+  canvas.elt.style.touchAction = 'none';
 }
 
 function draw() {
@@ -320,11 +322,6 @@ function mouseReleased() {
   currentStroke = null;
 }
 
-// Prevent page scroll/zoom while drawing on mobile
-function touchStarted() { return false; }
-function touchMoved()   { return false; }
-function touchEnded()   { return false; }
-
 function keyPressed() {
   if (key === 's') saveBird();
   if (key === 'z') undoStroke();
@@ -410,6 +407,8 @@ function createPalette() {
 
 window.onload = () => {
   createPalette();
+  document.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+  document.addEventListener('touchmove',  e => e.preventDefault(), { passive: false });
 };
 
 </script>
