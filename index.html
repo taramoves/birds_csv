@@ -28,6 +28,24 @@
 
 <!-- WebGL liquid shader background -->
 <canvas id="shader-bg"></canvas>
+<audio id="bg-audio" loop>
+  <source src="taras-birdworld-MASTER.mp3" type="audio/mpeg">
+</audio>
+<script>
+  const audio = document.getElementById('bg-audio');
+  function tryPlay() {
+    audio.play().catch(() => {});
+    window.removeEventListener('mousemove', tryPlay);
+    window.removeEventListener('keydown', tryPlay);
+    window.removeEventListener('click', tryPlay);
+  }
+  // Try immediately, then fall back to first interaction
+  audio.play().catch(() => {
+    window.addEventListener('mousemove', tryPlay);
+    window.addEventListener('keydown', tryPlay);
+    window.addEventListener('click', tryPlay);
+  });
+</script>
 <script>
 (function () {
   const canvas = document.getElementById('shader-bg');
