@@ -35,15 +35,20 @@
   const audio = document.getElementById('bg-audio');
   function tryPlay() {
     audio.play().catch(() => {});
-    window.removeEventListener('mousemove', tryPlay);
-    window.removeEventListener('keydown', tryPlay);
     window.removeEventListener('click', tryPlay);
+    window.removeEventListener('keydown', tryPlay);
+    window.removeEventListener('touchstart', tryPlay);
   }
-  // Try immediately, then fall back to first interaction
+  window.addEventListener('keydown', function onSpace(e) {
+    if (e.code === 'Space') {
+      audio.play().catch(() => {});
+      window.removeEventListener('keydown', onSpace);
+    }
+  });
   audio.play().catch(() => {
-    window.addEventListener('mousemove', tryPlay);
-    window.addEventListener('keydown', tryPlay);
     window.addEventListener('click', tryPlay);
+    window.addEventListener('keydown', tryPlay);
+    window.addEventListener('touchstart', tryPlay);
   });
 </script>
 <script>
