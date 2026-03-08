@@ -49,6 +49,8 @@
       padding: 20px;
       box-shadow: 0 4px 24px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06);
       display: inline-block;
+      max-width: calc(100vw - 16px);
+      box-sizing: border-box;
     }
     #canvas-container { line-height: 0; }
     #bird-drawer-app canvas {
@@ -130,9 +132,7 @@ let colorBtns = [];
 let saveBtn;
 
 function setup() {
-  const maxW = min(windowWidth - 40, 800);
-  const scale = maxW / 800;
-  let canvas = createCanvas(maxW, floor(630 * scale));
+  let canvas = createCanvas(800, 630);
   canvas.parent('canvas-container');
   canvas.elt.style.touchAction = 'none';
 }
