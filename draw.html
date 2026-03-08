@@ -108,6 +108,7 @@
   <div id="bird-drawer-app">
     <div id="canvas-container"></div>
     <div id="palette-area"></div>
+    <p style="text-align:center;font-size:0.7rem;color:#aaa;margin:10px 0 0;letter-spacing:0.03em;">by @taramoves</p>
   </div>
 <script>
 
@@ -137,7 +138,7 @@ function setup() {
 }
 
 function draw() {
-  background(253, 250, 248);
+  background(168);
 
   drawZones();
   drawGuides();
@@ -151,7 +152,7 @@ function draw() {
 }
 
 function drawZones() {
-  stroke(200, 195, 210);
+  stroke(140, 135, 150);
   strokeWeight(1);
   drawingContext.setLineDash([8, 6]);
 
@@ -162,7 +163,7 @@ function drawZones() {
 
   // Zone labels
   noStroke();
-  fill(170, 160, 180);
+  fill(130, 120, 140);
   textSize(12);
   textAlign(CENTER, TOP);
   textFont('Nunito');
@@ -172,7 +173,7 @@ function drawZones() {
 }
 
 function drawGuides() {
-  stroke(200, 195, 215);
+  stroke(140, 135, 155);
   strokeWeight(1);
   noFill();
   drawingContext.setLineDash([4, 5]);
@@ -207,7 +208,7 @@ function drawGuides() {
 }
 
 function drawAnchorPoints() {
-  fill(180, 170, 190);
+  fill(130, 120, 140);
   noStroke();
   circle(300, 315, 7);
   circle(500, 315, 7);
@@ -220,21 +221,54 @@ function drawEyes() {
   ellipse(423, 183, 8, 11);
 }
 
+function fillStrokeShape(strokeObj) {
+  const pts = strokeObj._smoothed;
+  if (!pts || pts.length < 4) return; // only completed strokes with enough points
+
+  const hex = strokeObj.color.replace('#', '');
+  const cr = parseInt(hex.substring(0, 2), 16);
+  const cg = parseInt(hex.substring(2, 4), 16);
+  const cb = parseInt(hex.substring(4, 6), 16);
+
+  let minX = pts[0].x, maxX = pts[0].x, minY = pts[0].y, maxY = pts[0].y;
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const radius = Math.sqrt((maxX - minX) ** 2 + (maxY - minY) ** 2) * 0.6;
+  if (radius < 1) return;
+
+  const grad = drawingContext.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  grad.addColorStop(0, `rgba(${cr},${cg},${cb},0.28)`);
+  grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+
+  drawingContext.save();
+  drawingContext.fillStyle = grad;
+  drawingContext.beginPath();
+  drawingContext.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) drawingContext.lineTo(pts[i].x, pts[i].y);
+  drawingContext.closePath();
+  drawingContext.fill();
+  drawingContext.restore();
+}
+
 function drawAllStrokes() {
   noFill();
 
-  // Draw body
-  bodyStrokes.forEach(s => drawStroke(s));
+  // Fill pass first (under strokes) — only completed strokes have _smoothed
+  bodyStrokes.forEach(s => fillStrokeShape(s));
+  wingStrokes.forEach(s => {
+    fillStrokeShape(s);
+    push(); scale(-1, 1); translate(-800, 0); fillStrokeShape(s); pop();
+  });
 
-  // Draw wings (left + mirrored right)
+  // Stroke pass on top
+  bodyStrokes.forEach(s => drawStroke(s));
   wingStrokes.forEach(s => {
     drawStroke(s);
-
-    push();
-    scale(-1, 1);
-    translate(-800, 0);
-    drawStroke(s);
-    pop();
+    push(); scale(-1, 1); translate(-800, 0); drawStroke(s); pop();
   });
 
   if (currentStroke) drawStroke(currentStroke);
@@ -332,7 +366,7 @@ function saveBird() {
   bodyStrokes.forEach(s => density += s.points.length);
   wingStrokes.forEach(s => density += s.points.length);
 
-  const birdData = { bodyStrokes, wingStrokes, density };
+  const birdData = { bodyStrokes, wingStrokes, density, createdAt: Date.now() };
   firebase.database().ref('birds').push(birdData);
 
   // Visual feedback on the button
@@ -361,6 +395,7 @@ function refreshCanvas() {
 
   // Pick 3 new custom colors, keep black and white
   const shuffled = [...CUSTOM_COLORS].sort(() => Math.random() - 0.5);
+  while (shuffled.length < 3) shuffled.push(shuffled[0] || '#bf1a2f');
   const newPick = ["#000000", "#ffffff", ...shuffled.slice(0, 3)];
   newPick.forEach((c, i) => {
     COLORS[i] = c;
@@ -406,9 +441,16 @@ function createPalette() {
 }
 
 window.onload = () => {
-  createPalette();
   document.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
   document.addEventListener('touchmove',  e => e.preventDefault(), { passive: false });
+  createPalette();
+  // Silently sync CUSTOM_COLORS from admin settings; takes effect on next Refresh click
+  firebase.database().ref('settings/colorPalette').once('value', snap => {
+    const pal = snap.val();
+    if (pal && Array.isArray(pal) && pal.length > 0) {
+      CUSTOM_COLORS.splice(0, CUSTOM_COLORS.length, ...pal);
+    }
+  });
 };
 
 </script>

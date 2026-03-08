@@ -65,6 +65,9 @@
   const frag = `
     precision mediump float;
     uniform vec2 resolution;
+    uniform vec3 c0;
+    uniform vec3 c1;
+    uniform vec3 c2;
 
     vec2 hash2(vec2 p) {
       p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
@@ -110,11 +113,6 @@
       float grain = gnoise(uv * 280.0) * 0.03;
       f = clamp(f + grain, 0.0, 1.0);
 
-      /* rolling hills palette: shadow green → vivid grass → sunny highlight */
-      vec3 c0 = vec3(0.12, 0.30, 0.08);
-      vec3 c1 = vec3(0.32, 0.60, 0.12);
-      vec3 c2 = vec3(0.58, 0.80, 0.22);
-
       float s = pow(f, 0.75);
       vec3 col = mix(c0, mix(c1, c2, s), s);
       gl_FragColor = vec4(col, 1.0);
@@ -140,6 +138,17 @@
   gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
   const uRes = gl.getUniformLocation(prog, 'resolution');
+  const uC0  = gl.getUniformLocation(prog, 'c0');
+  const uC1  = gl.getUniformLocation(prog, 'c1');
+  const uC2  = gl.getUniformLocation(prog, 'c2');
+
+  const BG_PALETTES = {
+    hills: [[0.12,0.30,0.08],[0.32,0.60,0.12],[0.58,0.80,0.22]],
+    snow:  [[0.55,0.62,0.75],[0.78,0.84,0.92],[0.95,0.97,1.00]],
+    sky:   [[0.25,0.45,0.75],[0.45,0.65,0.90],[0.70,0.85,1.00]],
+    dusk:  [[0.35,0.12,0.22],[0.68,0.30,0.15],[0.88,0.62,0.25]],
+    night: [[0.03,0.05,0.12],[0.06,0.10,0.22],[0.12,0.18,0.35]],
+  };
 
   function render() {
     canvas.width  = window.innerWidth;
@@ -148,8 +157,17 @@
     gl.uniform2f(uRes, canvas.width, canvas.height);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
+
+  window.setBirdBackground = function(name) {
+    const p = BG_PALETTES[name] || BG_PALETTES.hills;
+    gl.uniform3fv(uC0, p[0]);
+    gl.uniform3fv(uC1, p[1]);
+    gl.uniform3fv(uC2, p[2]);
+    render();
+  };
+
   window.addEventListener('resize', render);
-  render(); // draw once, stays static
+  window.setBirdBackground('hills'); // initial render
 })();
 </script>
 
@@ -158,6 +176,13 @@
 
 let birds = [];
 let knownKeys = new Set();
+let settings = { maxBirds: 0, showOnlyToday: false };
+
+function applySettings(s) {
+  settings.maxBirds = s.maxBirds || 0;
+  settings.showOnlyToday = !!s.showOnlyToday;
+  if (window.setBirdBackground) window.setBirdBackground(s.background || 'hills');
+}
 
 const BODY_BUF_W = 220, BODY_BUF_H = 650;
 const BODY_OX = 110, BODY_OY = 325;
@@ -169,15 +194,27 @@ const WING_OX = 410, WING_OY = 325;
 function setup() {
   createCanvas(window.innerWidth, window.innerHeight);
   frameRate(30);
-  loadBirds();
+  // on('value') fires once immediately with current data, then again on any change.
+  // We call loadBirds() only on the first fire so it's never called twice.
+  let birdsLoaded = false;
+  firebase.database().ref('settings').on('value', snap => {
+    applySettings(snap.val() || {});
+    if (!birdsLoaded) { birdsLoaded = true; loadBirds(); }
+  });
 }
 
 function draw() {
-  clear(); // transparent so the shader shows through
-  birds.forEach(b => {
-    b.update();
-    b.display();
-  });
+  clear();
+  let visible = birds;
+  if (settings.showOnlyToday) {
+    const d = new Date(); d.setHours(0, 0, 0, 0);
+    const todayMs = d.getTime();
+    visible = visible.filter(b => b.createdAt >= todayMs);
+  }
+  if (settings.maxBirds > 0 && visible.length > settings.maxBirds) {
+    visible = visible.slice(visible.length - settings.maxBirds);
+  }
+  visible.forEach(b => { b.update(); b.display(); });
 }
 
 function loadBirds() {
@@ -206,6 +243,37 @@ function mousePressed(event) {
   }
 }
 
+function fillBufferShape(gfx, pts, color) {
+  if (pts.length < 4) return;
+  const hex = color.replace('#', '');
+  const cr = parseInt(hex.substring(0, 2), 16);
+  const cg = parseInt(hex.substring(2, 4), 16);
+  const cb = parseInt(hex.substring(4, 6), 16);
+
+  let minX = pts[0].x, maxX = pts[0].x, minY = pts[0].y, maxY = pts[0].y;
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const radius = Math.sqrt((maxX - minX) ** 2 + (maxY - minY) ** 2) * 0.6;
+  if (radius < 1) return;
+
+  const grad = gfx.drawingContext.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  grad.addColorStop(0, `rgba(${cr},${cg},${cb},0.28)`);
+  grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+
+  gfx.drawingContext.save();
+  gfx.drawingContext.fillStyle = grad;
+  gfx.drawingContext.beginPath();
+  gfx.drawingContext.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) gfx.drawingContext.lineTo(pts[i].x, pts[i].y);
+  gfx.drawingContext.closePath();
+  gfx.drawingContext.fill();
+  gfx.drawingContext.restore();
+}
+
 function blendWithWhite(hex, amount) {
   const c = hex.replace('#', '');
   const r = parseInt(c.substring(0, 2), 16);
@@ -221,6 +289,7 @@ function blendWithWhite(hex, amount) {
 class Bird {
   constructor(data, storageKey) {
     this.storageKey = storageKey;
+    this.createdAt = data.createdAt || 0;
     this.x = random(width);
     this.y = random(-150, height);
     this.scaleFactor = random(0.2, 0.65);
@@ -237,6 +306,14 @@ class Bird {
     this.bodyBuffer.noFill();
     this.bodyBuffer.strokeCap(ROUND);
     this.bodyBuffer.strokeJoin(ROUND);
+    // Fill pass first (drawn under strokes)
+    data.bodyStrokes.forEach(s => {
+      if (s.points.length >= 4) {
+        const pts = s.points.map(p => ({ x: p.x - 400 + BODY_OX, y: p.y - 315 + BODY_OY }));
+        fillBufferShape(this.bodyBuffer, pts, s.color);
+      }
+    });
+    // Stroke pass on top
     data.bodyStrokes.forEach(s => {
       const pts = s.points;
       const n = pts.length;
@@ -265,24 +342,34 @@ class Bird {
     }
     this.shadowBuffer.updatePixels();
 
-    // Wing buffer — pre-rendered, avoids beginShape loops every frame
+    // Wing buffer — pre-rendered using line() calls (same approach as bodyBuffer)
     this.wingBuffer = createGraphics(WING_W, WING_H);
     this.wingBuffer.pixelDensity(1);
     this.wingBuffer.clear();
     this.wingBuffer.noFill();
     this.wingBuffer.strokeCap(ROUND);
+    // Fill pass first
     data.wingStrokes.forEach(s => {
-      // Normalize both zones to left side (x<=0); display() mirrors for right side
+      if (!s.points || s.points.length < 4) return;
+      const pts = s.points.map(p => {
+        let x = p.x - 400; if (x > 0) x = -x;
+        return { x: x + WING_OX, y: p.y - 315 + WING_OY };
+      });
+      fillBufferShape(this.wingBuffer, pts, s.color);
+    });
+    // Stroke pass on top
+    data.wingStrokes.forEach(s => {
+      if (!s.points || s.points.length < 2) return;
       const pts = s.points.map(p => {
         let x = p.x - 400;
         if (x > 0) x = -x;
-        return { x, y: p.y - 315 };
+        return { x: x + WING_OX, y: p.y - 315 + WING_OY };
       });
       this.wingBuffer.stroke(s.color);
       this.wingBuffer.strokeWeight(s.size);
-      this.wingBuffer.beginShape();
-      pts.forEach(p => this.wingBuffer.vertex(p.x + WING_OX, p.y + WING_OY));
-      this.wingBuffer.endShape();
+      for (let i = 0; i < pts.length - 1; i++) {
+        this.wingBuffer.line(pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y);
+      }
     });
 
     // Wing shadow buffer — same geometry, dark strokes
@@ -292,16 +379,17 @@ class Bird {
     this.wingShadowBuffer.noFill();
     this.wingShadowBuffer.strokeCap(ROUND);
     data.wingStrokes.forEach(s => {
+      if (!s.points || s.points.length < 2) return;
       const pts = s.points.map(p => {
         let x = p.x - 400;
         if (x > 0) x = -x;
-        return { x, y: p.y - 315 };
+        return { x: x + WING_OX, y: p.y - 315 + WING_OY };
       });
       this.wingShadowBuffer.stroke(0, 0, 0, 70);
       this.wingShadowBuffer.strokeWeight(s.size);
-      this.wingShadowBuffer.beginShape();
-      pts.forEach(p => this.wingShadowBuffer.vertex(p.x + WING_OX, p.y + WING_OY));
-      this.wingShadowBuffer.endShape();
+      for (let i = 0; i < pts.length - 1; i++) {
+        this.wingShadowBuffer.line(pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y);
+      }
     });
   }
 
