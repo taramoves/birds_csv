@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="color-scheme" content="light">
   <title>Draw a Bird</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,6 +36,7 @@
       justify-content: center !important;
       overflow: hidden !important;
       touch-action: none;
+      color-scheme: light;
     }
     h1 {
       color: #fff;
@@ -71,25 +73,24 @@
       gap: 8px;
     }
     #palette-area .color-btn {
-      width: 36px;
-      height: 36px;
-      border: 2px solid rgba(0,0,0,0.15);
+      width: 40px;
+      height: 40px;
+      border: none;
       border-radius: 50%;
       cursor: pointer;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.18);
-      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      background: none;
+      padding: 0;
       -webkit-appearance: none;
       appearance: none;
+      transition: transform 0.15s ease;
       forced-color-adjust: none;
     }
-    #palette-area .color-btn:hover {
-      transform: scale(1.15);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-    }
+    #palette-area .color-btn:hover { transform: scale(1.15); }
     #palette-area .color-btn.selected {
       outline: 3px solid #999;
       outline-offset: 3px;
     }
+    #palette-area .color-btn svg { display: block; forced-color-adjust: none; }
     #palette-area .action-btn {
       font-family: 'Nunito', sans-serif;
       font-weight: 600;
@@ -403,11 +404,17 @@ function refreshCanvas() {
   const newPick = ["#000000", "#ffffff", ...shuffled.slice(0, 3)];
   newPick.forEach((c, i) => {
     COLORS[i] = c;
-    colorBtns[i].style("background-color", c);
+    const circle = colorBtns[i].elt.querySelector('circle');
+    if (circle) circle.setAttribute('fill', c);
   });
   currentColor = "#000000";
   colorBtns.forEach(b => b.removeClass('selected'));
   colorBtns[0].addClass('selected');
+}
+
+function colorSwatch(hex) {
+  // SVG fill is immune to browser auto-darkening and forced-colors mode
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40" style="forced-color-adjust:none"><circle cx="20" cy="20" r="17" fill="${hex}" stroke="rgba(0,0,0,0.18)" stroke-width="1.5"/></svg>`;
 }
 
 function createPalette() {
@@ -417,8 +424,7 @@ function createPalette() {
     let btn = createButton("");
     btn.parent(palette);
     btn.addClass('color-btn');
-    btn.style("background-color", c);
-    btn.size(40, 40);
+    btn.elt.innerHTML = colorSwatch(c);
     btn.mousePressed(() => {
       currentColor = COLORS[i];
       colorBtns.forEach(b => b.removeClass('selected'));
