@@ -138,8 +138,11 @@ let saveBtn;
 function setup() {
   let canvas = createCanvas(800, 630);
   canvas.parent('canvas-container');
-  canvas.elt.style.height = 'auto'; // clear p5.js inline height so CSS aspect-ratio takes over
+  canvas.elt.style.height = 'auto';
   canvas.elt.style.touchAction = 'none';
+  // Prevent scroll during drawing on the canvas only — NOT the whole document
+  canvas.elt.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+  canvas.elt.addEventListener('touchmove',  e => e.preventDefault(), { passive: false });
 }
 
 function draw() {
@@ -450,15 +453,27 @@ function createPalette() {
   saveBtn.mousePressed(saveBird);
 }
 
+function applyAdminPalette(pal) {
+  CUSTOM_COLORS.splice(0, CUSTOM_COLORS.length, ...pal);
+  const shuffled = [...CUSTOM_COLORS].sort(() => Math.random() - 0.5);
+  while (shuffled.length < 3) shuffled.push(shuffled[0] || '#bf1a2f');
+  const newPick = ["#000000", "#ffffff", ...shuffled.slice(0, 3)];
+  newPick.forEach((c, i) => {
+    COLORS[i] = c;
+    const circle = colorBtns[i] && colorBtns[i].elt.querySelector('circle');
+    if (circle) circle.setAttribute('fill', c);
+  });
+  currentColor = "#000000";
+  colorBtns.forEach(b => b.removeClass('selected'));
+  if (colorBtns[0]) colorBtns[0].addClass('selected');
+}
+
 window.onload = () => {
-  document.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
-  document.addEventListener('touchmove',  e => e.preventDefault(), { passive: false });
-  createPalette();
-  // Silently sync CUSTOM_COLORS from admin settings; takes effect on next Refresh click
+  createPalette(); // Show default colors immediately
   firebase.database().ref('settings/colorPalette').once('value', snap => {
     const pal = snap.val();
     if (pal && Array.isArray(pal) && pal.length > 0) {
-      CUSTOM_COLORS.splice(0, CUSTOM_COLORS.length, ...pal);
+      applyAdminPalette(pal); // Update buttons with admin-configured colors
     }
   });
 };
