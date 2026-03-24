@@ -10,6 +10,35 @@
   <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* Loading bar */
+    #load-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      z-index: 1000;
+      overflow: hidden;
+      background: #0a0a0a;
+    }
+    #load-bar::after {
+      content: '';
+      position: absolute;
+      top: 0; bottom: 0;
+      left: -55%;
+      width: 55%;
+      background: linear-gradient(90deg, transparent, #2a8a55, #4ecf80, #2a8a55, transparent);
+      animation: bar-slide 1.4s ease-in-out infinite;
+    }
+    @keyframes bar-slide {
+      0%   { left: -55%; }
+      100% { left: 100%; }
+    }
+    #load-bar.done {
+      opacity: 0;
+      transition: opacity 0.4s ease 0.2s;
+      pointer-events: none;
+    }
+
     body {
       background: #0a0a0a;
       color: #f0f0f0;
@@ -51,18 +80,39 @@
     .stat .l { font-size: 0.7rem; color: #555; margin-top: 4px; }
 
     /* Bird list */
-    #bird-list { max-height: 300px; overflow-y: auto; }
+    #bird-list { max-height: 440px; overflow-y: auto; }
     .bird-row {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 7px 0;
+      padding: 8px 0;
       border-bottom: 1px solid #1a1a1a;
       font-size: 0.82rem;
     }
     .bird-row:last-child { border-bottom: none; }
-    .bird-row .time { color: #666; flex: 1; }
-    .bird-row .pts { color: #444; width: 52px; text-align: right; white-space: nowrap; }
+    .bird-row .time { color: #666; flex: 1; font-size: 0.75rem; }
+    .bird-row .pts { color: #444; width: 44px; text-align: right; white-space: nowrap; font-size: 0.72rem; }
+    .bird-thumb {
+      width: 90px;
+      height: 70px;
+      border-radius: 5px;
+      background: #1a1a1a;
+      flex-shrink: 0;
+      display: block;
+    }
+    .star-btn {
+      background: none;
+      border: none;
+      color: #3a3a3a;
+      font-size: 1.1rem;
+      cursor: pointer;
+      padding: 2px 4px;
+      line-height: 1;
+      transition: color 0.12s;
+      flex-shrink: 0;
+    }
+    .star-btn:hover { color: #f0c040; }
+    .star-btn.starred { color: #f0c040; }
     .del-btn {
       background: none;
       border: 1px solid #252525;
@@ -213,6 +263,7 @@
   </style>
 </head>
 <body>
+<div id="load-bar"></div>
 <div class="page">
 
   <header>
@@ -225,11 +276,11 @@
     <div class="card-title">Birds</div>
     <div class="stats">
       <div class="stat">
-        <div class="n" id="count-total">—</div>
+        <div class="n" id="count-total">0</div>
         <div class="l">Total birds</div>
       </div>
       <div class="stat">
-        <div class="n" id="count-today">—</div>
+        <div class="n" id="count-today">0</div>
         <div class="l">Today</div>
       </div>
     </div>
@@ -257,6 +308,16 @@
       </div>
       <label class="tog">
         <input type="checkbox" id="today-only">
+        <div class="tog-track"></div>
+      </label>
+    </div>
+    <div class="setting">
+      <div>
+        <div class="lbl">Favorites only</div>
+        <div class="desc">Show only starred birds</div>
+      </div>
+      <label class="tog">
+        <input type="checkbox" id="favorites-only">
         <div class="tog-track"></div>
       </label>
     </div>
@@ -320,41 +381,187 @@
     const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime();
   }
 
-  // ---- Render bird list ----
-  function renderBirds() {
-    const sorted = [...allBirds].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    document.getElementById('count-total').textContent = allBirds.length;
-    const todayN = allBirds.filter(b => b.createdAt && b.createdAt >= todayStart()).length;
-    document.getElementById('count-today').textContent = todayN;
-
-    const list = document.getElementById('bird-list');
-    list.innerHTML = '';
-    if (!sorted.length) {
-      list.innerHTML = '<div style="color:#444;font-size:0.82rem;padding:8px 0">No birds saved yet.</div>';
-      return;
+  // Decode points from either legacy [{x,y},...] or compact [x1,y1,...] format.
+  function decodePoints(pts) {
+    if (!pts || pts.length === 0) return [];
+    if (typeof pts[0] === 'number') {
+      const r = [];
+      for (let i = 0; i + 1 < pts.length; i += 2) r.push({ x: pts[i], y: pts[i + 1] });
+      return r;
     }
-    sorted.forEach(bird => {
-      const row = document.createElement('div');
-      row.className = 'bird-row';
-      row.innerHTML = `
-        <span class="time">${formatTime(bird.createdAt)}</span>
-        <span class="pts">${bird.density || '?'} pts</span>
-        <button class="del-btn" title="Delete this bird">✕</button>
-      `;
-      row.querySelector('.del-btn').onclick = () => db.ref('birds').child(bird.key).remove();
-      list.appendChild(row);
+    return pts;
+  }
+
+  // ---- Render bird thumbnail onto a canvas element ----
+  function renderBirdThumbnail(canvasEl, data) {
+    const W = canvasEl.width, H = canvasEl.height;
+    const sx = W / 800, sy = H / 630;
+    const ctx = canvasEl.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    (data.bodyStrokes || []).forEach(s => {
+      const pts = decodePoints(s.points);
+      if (!pts || pts.length < 2) return;
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = Math.max(0.5, s.size * sx);
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x * sx, pts[0].y * sy);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x * sx, pts[i].y * sy);
+      ctx.stroke();
+    });
+
+    (data.wingStrokes || []).forEach(s => {
+      const pts = decodePoints(s.points);
+      if (!pts || pts.length < 2) return;
+      const leftPts = pts.map(p => { let x = p.x - 400; if (x > 0) x = -x; return { x: x + 400, y: p.y }; });
+      const rightPts = leftPts.map(p => ({ x: 800 - p.x, y: p.y }));
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = Math.max(0.5, s.size * sx);
+      [leftPts, rightPts].forEach(sidePts => {
+        ctx.beginPath();
+        ctx.moveTo(sidePts[0].x * sx, sidePts[0].y * sy);
+        for (let i = 1; i < sidePts.length; i++) ctx.lineTo(sidePts[i].x * sx, sidePts[i].y * sy);
+        ctx.stroke();
+      });
+    });
+
+    ctx.fillStyle = '#000';
+    [[377, 183, 4, 5.5], [423, 183, 4, 5.5]].forEach(([ex, ey, rx, ry]) => {
+      ctx.beginPath();
+      ctx.ellipse(ex * sx, ey * sy, rx * sx, ry * sy, 0, 0, Math.PI * 2);
+      ctx.fill();
     });
   }
 
+  // ---- Lazy thumbnail observer ----
+  let thumbObserver = null;
+  function getThumbObserver() {
+    if (!thumbObserver) {
+      thumbObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting || entry.target.dataset.rendered) return;
+          entry.target.dataset.rendered = '1';
+          const key = entry.target.dataset.key;
+          const bird = allBirds.find(b => b.key === key);
+          if (!bird) return;
+          if (bird.bodyStrokes) {
+            renderBirdThumbnail(entry.target, bird);
+          } else {
+            db.ref('birds').child(key).once('value', snap => {
+              const d = snap.val();
+              if (d) {
+                bird.bodyStrokes = d.bodyStrokes || [];
+                bird.wingStrokes = d.wingStrokes || [];
+                renderBirdThumbnail(entry.target, bird);
+              }
+            });
+          }
+        });
+      }, { rootMargin: '80px' });
+    }
+    return thumbObserver;
+  }
+
+  // ---- Build a single bird row element ----
+  function createBirdRow(bird) {
+    const row = document.createElement('div');
+    row.className = 'bird-row';
+    row.dataset.key = bird.key;
+
+    const thumb = document.createElement('canvas');
+    thumb.className = 'bird-thumb';
+    thumb.width = 90; thumb.height = 70;
+    thumb.dataset.key = bird.key;
+    if (bird.bodyStrokes) { thumb.dataset.rendered = '1'; renderBirdThumbnail(thumb, bird); }
+    row.appendChild(thumb);
+
+    const info = document.createElement('span');
+    info.className = 'time';
+    info.textContent = formatTime(bird.createdAt);
+    row.appendChild(info);
+
+    const pts = document.createElement('span');
+    pts.className = 'pts';
+    pts.textContent = `${bird.density || '?'} pts`;
+    row.appendChild(pts);
+
+    const starBtn = document.createElement('button');
+    starBtn.className = 'star-btn' + (bird.starred ? ' starred' : '');
+    starBtn.title = bird.starred ? 'Unstar' : 'Star';
+    starBtn.textContent = bird.starred ? '★' : '☆';
+    starBtn.onclick = () => db.ref('birds').child(bird.key).update({ starred: !bird.starred });
+    row.appendChild(starBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'del-btn';
+    delBtn.title = 'Delete this bird';
+    delBtn.textContent = '✕';
+    delBtn.onclick = () => db.ref('birds').child(bird.key).remove();
+    row.appendChild(delBtn);
+
+    return row;
+  }
+
+  // ---- Update stat counters ----
+  function updateStats() {
+    document.getElementById('count-total').textContent = allBirds.length;
+    const todayN = allBirds.filter(b => b.createdAt && b.createdAt >= todayStart()).length;
+    document.getElementById('count-today').textContent = todayN;
+  }
+
   // ---- Firebase bird listeners ----
+  // child_added: prepend each bird row as it arrives (Firebase sends oldest→newest,
+  // so prepending gives newest-first order without any sorting or full rebuild).
   db.ref('birds').on('child_added', snap => {
     const d = snap.val();
-    allBirds.push({ key: snap.key, createdAt: d.createdAt || null, density: d.density || 0 });
-    renderBirds();
+    const bird = {
+      key: snap.key,
+      createdAt: d.createdAt || null,
+      density: d.density || 0,
+      starred: d.starred || false,
+    };
+    allBirds.push(bird);
+    updateStats();
+
+    const list = document.getElementById('bird-list');
+    // Remove "no birds" placeholder if present
+    const placeholder = list.querySelector('.no-birds');
+    if (placeholder) placeholder.remove();
+
+    const row = createBirdRow(bird);
+    list.insertBefore(row, list.firstChild); // prepend = newest at top
+    const thumb = row.querySelector('.bird-thumb');
+    if (thumb && !bird.bodyStrokes) getThumbObserver().observe(thumb);
   });
+
+  // child_removed: remove just that row, no full rebuild needed
   db.ref('birds').on('child_removed', snap => {
     allBirds = allBirds.filter(b => b.key !== snap.key);
-    renderBirds();
+    updateStats();
+    const row = document.querySelector(`.bird-row[data-key="${snap.key}"]`);
+    if (row) row.remove();
+    if (!allBirds.length) {
+      document.getElementById('bird-list').innerHTML =
+        '<div class="no-birds" style="color:#444;font-size:0.82rem;padding:8px 0">No birds saved yet.</div>';
+    }
+  });
+
+  // child_changed: update just the star button in place, no full rebuild needed
+  db.ref('birds').on('child_changed', snap => {
+    const d = snap.val();
+    const idx = allBirds.findIndex(b => b.key === snap.key);
+    if (idx === -1) return;
+    allBirds[idx].starred = d.starred || false;
+    const row = document.querySelector(`.bird-row[data-key="${snap.key}"]`);
+    if (row) {
+      const starBtn = row.querySelector('.star-btn');
+      const starred = allBirds[idx].starred;
+      starBtn.className = 'star-btn' + (starred ? ' starred' : '');
+      starBtn.title = starred ? 'Unstar' : 'Star';
+      starBtn.textContent = starred ? '★' : '☆';
+    }
   });
 
   document.getElementById('del-today').onclick = () => {
@@ -445,24 +652,41 @@
     db.ref('settings').update({
       maxBirds: parseInt(document.getElementById('max-birds').value) || 0,
       showOnlyToday: document.getElementById('today-only').checked,
+      showOnlyFavorites: document.getElementById('favorites-only').checked,
       background: currentBg,
       colorPalette: currentPalette,
     });
   }
 
   // ---- Load settings ----
+  // Render UI immediately with defaults so the page looks complete right away,
+  // then update once Firebase responds with the saved values.
+  buildBgPicker(currentBg);
+  buildPalettePicker(currentPalette);
+
   db.ref('settings').once('value', snap => {
     const s = snap.val() || {};
-    currentBg = s.background || 'hills';
-    currentPalette = s.colorPalette || ["#bf1a2f","#05a8aa","#f58a07","#f4e409","#402039","#004f2d"];
+    const newBg = s.background || 'hills';
+    const newPalette = s.colorPalette || ["#bf1a2f","#05a8aa","#f58a07","#f4e409","#402039","#004f2d"];
     document.getElementById('max-birds').value = s.maxBirds || 0;
     document.getElementById('today-only').checked = !!s.showOnlyToday;
-    buildBgPicker(currentBg);
-    buildPalettePicker(currentPalette);
+    document.getElementById('favorites-only').checked = !!s.showOnlyFavorites;
+    // Only rebuild pickers if values differ from defaults
+    if (newBg !== currentBg) { currentBg = newBg; buildBgPicker(currentBg); }
+    if (JSON.stringify(newPalette) !== JSON.stringify(currentPalette)) {
+      currentPalette = newPalette;
+      buildPalettePicker(currentPalette);
+    }
   });
 
   document.getElementById('max-birds').onchange = saveSettings;
   document.getElementById('today-only').onchange = saveSettings;
+  document.getElementById('favorites-only').onchange = saveSettings;
+
+  // Hide loading bar once all initial bird data has arrived
+  db.ref('birds').once('value', () => {
+    document.getElementById('load-bar').classList.add('done');
+  });
 </script>
 </body>
 </html>

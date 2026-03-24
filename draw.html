@@ -369,12 +369,50 @@ function keyPressed() {
   if (key === 'z') undoStroke();
 }
 
-function saveBird() {
-  let density = 0;
-  bodyStrokes.forEach(s => density += s.points.length);
-  wingStrokes.forEach(s => density += s.points.length);
+// Ramer-Douglas-Peucker point simplification (iterative, no recursion overflow).
+// Removes points that deviate less than `eps` pixels from the line they fall on.
+function rdp(pts, eps) {
+  if (pts.length <= 2) return pts;
+  const n = pts.length;
+  const keep = new Uint8Array(n);
+  keep[0] = keep[n - 1] = 1;
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [s, e] = stack.pop();
+    if (e - s < 2) continue;
+    const x1 = pts[s].x, y1 = pts[s].y, xe = pts[e].x, ye = pts[e].y;
+    const dx = xe - x1, dy = ye - y1, len = Math.sqrt(dx * dx + dy * dy);
+    let maxD = 0, mi = s;
+    for (let i = s + 1; i < e; i++) {
+      const d = len > 0
+        ? Math.abs(dy * pts[i].x - dx * pts[i].y + xe * y1 - ye * x1) / len
+        : Math.sqrt((pts[i].x - x1) ** 2 + (pts[i].y - y1) ** 2);
+      if (d > maxD) { maxD = d; mi = i; }
+    }
+    if (maxD > eps) { keep[mi] = 1; stack.push([s, mi], [mi, e]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
 
-  const birdData = { bodyStrokes, wingStrokes, density, createdAt: Date.now() };
+function saveBird() {
+  // Simplify each stroke with RDP (epsilon=2px — invisible at strokeWeight 16)
+  // then store as flat [x1,y1,x2,y2,...] integer array (~10-20x smaller than {x,y} objects).
+  const compress = s => {
+    const simple = s.points.length >= 3 ? rdp(s.points, 2.0) : s.points;
+    return {
+      color: s.color,
+      size:  s.size,
+      points: simple.flatMap(p => [Math.round(p.x), Math.round(p.y)])
+    };
+  };
+
+  const cBody = bodyStrokes.filter(s => s.points.length >= 2).map(compress);
+  const cWing = wingStrokes.filter(s => s.points.length >= 2).map(compress);
+
+  let density = 0;
+  [...cBody, ...cWing].forEach(s => density += s.points.length / 2);
+
+  const birdData = { bodyStrokes: cBody, wingStrokes: cWing, density, createdAt: Date.now() };
   firebase.database().ref('birds').push(birdData);
 
   // Visual feedback on the button

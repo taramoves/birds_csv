@@ -176,11 +176,12 @@
 
 let birds = [];
 let knownKeys = new Set();
-let settings = { maxBirds: 0, showOnlyToday: false };
+let settings = { maxBirds: 0, showOnlyToday: false, showOnlyFavorites: false };
 
 function applySettings(s) {
   settings.maxBirds = s.maxBirds || 0;
   settings.showOnlyToday = !!s.showOnlyToday;
+  settings.showOnlyFavorites = !!s.showOnlyFavorites;
   if (window.setBirdBackground) window.setBirdBackground(s.background || 'hills');
 }
 
@@ -211,6 +212,9 @@ function draw() {
     const todayMs = d.getTime();
     visible = visible.filter(b => b.createdAt >= todayMs);
   }
+  if (settings.showOnlyFavorites) {
+    visible = visible.filter(b => b.starred);
+  }
   if (settings.maxBirds > 0 && visible.length > settings.maxBirds) {
     visible = visible.slice(visible.length - settings.maxBirds);
   }
@@ -218,12 +222,18 @@ function draw() {
 }
 
 function loadBirds() {
-  firebase.database().ref('birds').on('child_added', (snapshot) => {
+  // limitToLast(500) caps the download to ~5 days of birds at 100/day.
+  // Client-side filters (showOnlyToday, maxBirds, favorites) still apply after load.
+  firebase.database().ref('birds').limitToLast(500).on('child_added', (snapshot) => {
     const key = snapshot.key;
     if (!knownKeys.has(key)) {
       birds.push(new Bird(snapshot.val(), key));
       knownKeys.add(key);
     }
+  });
+  firebase.database().ref('birds').on('child_changed', (snapshot) => {
+    const bird = birds.find(b => b.storageKey === snapshot.key);
+    if (bird) bird.starred = snapshot.val().starred || false;
   });
 }
 
@@ -241,6 +251,39 @@ function mousePressed(event) {
     knownKeys.delete(closest.storageKey);
     birds.splice(birds.indexOf(closest), 1);
   }
+}
+
+// Decode points saved by draw.html — handles both formats:
+//   legacy:  [{x, y}, ...]           (old birds)
+//   compact: [x1, y1, x2, y2, ...]   (new birds, ~10x smaller)
+function decodePoints(pts) {
+  if (!pts || pts.length === 0) return [];
+  if (typeof pts[0] === 'number') {
+    const r = [];
+    for (let i = 0; i + 1 < pts.length; i += 2) r.push({ x: pts[i], y: pts[i + 1] });
+    return r;
+  }
+  return pts;
+}
+
+// Catmull-Rom spline through pts — same algorithm as draw.html,
+// produces smooth curves from the simplified control points.
+function catmullRomPoints(pts, steps = 8) {
+  if (pts.length < 2) return [...pts];
+  const result = [], n = pts.length;
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i];
+    const p2 = pts[i + 1], p3 = pts[Math.min(n - 1, i + 2)];
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps, t2 = t * t, t3 = t2 * t;
+      result.push({
+        x: 0.5 * ((2*p1.x) + (-p0.x+p2.x)*t + (2*p0.x-5*p1.x+4*p2.x-p3.x)*t2 + (-p0.x+3*p1.x-3*p2.x+p3.x)*t3),
+        y: 0.5 * ((2*p1.y) + (-p0.y+p2.y)*t + (2*p0.y-5*p1.y+4*p2.y-p3.y)*t2 + (-p0.y+3*p1.y-3*p2.y+p3.y)*t3),
+      });
+    }
+  }
+  result.push(pts[n - 1]);
+  return result;
 }
 
 function fillBufferShape(gfx, pts, color) {
@@ -289,6 +332,7 @@ function blendWithWhite(hex, amount) {
 class Bird {
   constructor(data, storageKey) {
     this.storageKey = storageKey;
+    this.starred = data.starred || false;
     this.createdAt = data.createdAt || 0;
     this.x = random(width);
     this.y = random(-150, height);
@@ -306,26 +350,21 @@ class Bird {
     this.bodyBuffer.noFill();
     this.bodyBuffer.strokeCap(ROUND);
     this.bodyBuffer.strokeJoin(ROUND);
-    // Fill pass first (drawn under strokes)
     data.bodyStrokes.forEach(s => {
-      if (s.points.length >= 4) {
-        const pts = s.points.map(p => ({ x: p.x - 400 + BODY_OX, y: p.y - 315 + BODY_OY }));
-        fillBufferShape(this.bodyBuffer, pts, s.color);
-      }
-    });
-    // Stroke pass on top
-    data.bodyStrokes.forEach(s => {
-      const pts = s.points;
+      // Decode compact format, smooth with Catmull-Rom, then shift to buffer coords
+      const raw = decodePoints(s.points);
+      if (raw.length < 2) return;
+      const pts = catmullRomPoints(raw).map(p => ({ x: p.x - 400 + BODY_OX, y: p.y - 315 + BODY_OY }));
+      // Fill pass
+      if (pts.length >= 4) fillBufferShape(this.bodyBuffer, pts, s.color);
+      // Stroke pass
       const n = pts.length;
       for (let i = 0; i < n - 1; i++) {
         const t = i / Math.max(n - 2, 1);
         this.bodyBuffer.strokeWeight(s.size * (0.3 + 0.7 * Math.sin(t * Math.PI)));
         const [r, g, b] = blendWithWhite(s.color, 0.42 * (1 - t));
         this.bodyBuffer.stroke(r, g, b);
-        this.bodyBuffer.line(
-          pts[i].x   - 400 + BODY_OX, pts[i].y   - 315 + BODY_OY,
-          pts[i+1].x - 400 + BODY_OX, pts[i+1].y - 315 + BODY_OY
-        );
+        this.bodyBuffer.line(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
       }
     });
 
@@ -348,27 +387,18 @@ class Bird {
     this.wingBuffer.clear();
     this.wingBuffer.noFill();
     this.wingBuffer.strokeCap(ROUND);
-    // Fill pass first
     data.wingStrokes.forEach(s => {
-      if (!s.points || s.points.length < 4) return;
-      const pts = s.points.map(p => {
+      const raw = decodePoints(s.points || []);
+      if (raw.length < 2) return;
+      const pts = catmullRomPoints(raw).map(p => {
         let x = p.x - 400; if (x > 0) x = -x;
         return { x: x + WING_OX, y: p.y - 315 + WING_OY };
       });
-      fillBufferShape(this.wingBuffer, pts, s.color);
-    });
-    // Stroke pass on top
-    data.wingStrokes.forEach(s => {
-      if (!s.points || s.points.length < 2) return;
-      const pts = s.points.map(p => {
-        let x = p.x - 400;
-        if (x > 0) x = -x;
-        return { x: x + WING_OX, y: p.y - 315 + WING_OY };
-      });
+      if (pts.length >= 4) fillBufferShape(this.wingBuffer, pts, s.color);
       this.wingBuffer.stroke(s.color);
       this.wingBuffer.strokeWeight(s.size);
       for (let i = 0; i < pts.length - 1; i++) {
-        this.wingBuffer.line(pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y);
+        this.wingBuffer.line(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
       }
     });
 
@@ -379,16 +409,16 @@ class Bird {
     this.wingShadowBuffer.noFill();
     this.wingShadowBuffer.strokeCap(ROUND);
     data.wingStrokes.forEach(s => {
-      if (!s.points || s.points.length < 2) return;
-      const pts = s.points.map(p => {
-        let x = p.x - 400;
-        if (x > 0) x = -x;
+      const raw = decodePoints(s.points || []);
+      if (raw.length < 2) return;
+      const pts = catmullRomPoints(raw).map(p => {
+        let x = p.x - 400; if (x > 0) x = -x;
         return { x: x + WING_OX, y: p.y - 315 + WING_OY };
       });
       this.wingShadowBuffer.stroke(0, 0, 0, 70);
       this.wingShadowBuffer.strokeWeight(s.size);
       for (let i = 0; i < pts.length - 1; i++) {
-        this.wingShadowBuffer.line(pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y);
+        this.wingShadowBuffer.line(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
       }
     });
   }
