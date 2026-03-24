@@ -198,7 +198,7 @@ function setup() {
   // on('value') fires once immediately with current data, then again on any change.
   // We call loadBirds() only on the first fire so it's never called twice.
   let birdsLoaded = false;
-  firebase.database().ref('settings').on('value', snap => {
+  firebase.database().ref('v2/settings').on('value', snap => {
     applySettings(snap.val() || {});
     if (!birdsLoaded) { birdsLoaded = true; loadBirds(); }
   });
@@ -222,18 +222,28 @@ function draw() {
 }
 
 function loadBirds() {
-  // limitToLast(500) caps the download to ~5 days of birds at 100/day.
-  // Client-side filters (showOnlyToday, maxBirds, favorites) still apply after load.
-  firebase.database().ref('birds').limitToLast(500).on('child_added', (snapshot) => {
+  // Listen on birds_meta (tiny — no stroke data) to get the list of bird keys.
+  // Fetch stroke data from birds/{id} individually, only when a key is new.
+  firebase.database().ref('v2/birds_meta').limitToLast(500).on('child_added', async (snapshot) => {
     const key = snapshot.key;
-    if (!knownKeys.has(key)) {
-      birds.push(new Bird(snapshot.val(), key));
-      knownKeys.add(key);
+    if (knownKeys.has(key)) return;
+    knownKeys.add(key);
+    const birdSnap = await firebase.database().ref('v2/birds').child(key).once('value');
+    const data = birdSnap.val();
+    if (data?.bodyStrokes && data?.wingStrokes) {
+      birds.push(new Bird(data, key));
     }
   });
-  firebase.database().ref('birds').on('child_changed', (snapshot) => {
+  // starred changes come from birds_meta too
+  firebase.database().ref('v2/birds_meta').on('child_changed', (snapshot) => {
     const bird = birds.find(b => b.storageKey === snapshot.key);
     if (bird) bird.starred = snapshot.val().starred || false;
+  });
+  // handle deletions
+  firebase.database().ref('v2/birds_meta').on('child_removed', (snapshot) => {
+    const idx = birds.findIndex(b => b.storageKey === snapshot.key);
+    if (idx !== -1) birds.splice(idx, 1);
+    knownKeys.delete(snapshot.key);
   });
 }
 
@@ -247,7 +257,7 @@ function mousePressed(event) {
     if (d < hitR && d < closestDist) { closest = b; closestDist = d; }
   }
   if (closest) {
-    firebase.database().ref('birds').child(closest.storageKey).remove();
+    firebase.database().ref('v2/birds').child(closest.storageKey).remove();
     knownKeys.delete(closest.storageKey);
     birds.splice(birds.indexOf(closest), 1);
   }

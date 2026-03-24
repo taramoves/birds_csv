@@ -288,12 +288,13 @@
     <div class="action-row">
       <button class="btn" id="del-today">Delete today's birds</button>
       <button class="btn" id="del-all">Delete all birds</button>
+      <button class="btn" id="migrate-meta" title="Backfill fast index for birds saved before this update">Rebuild index</button>
     </div>
   </div>
 
   <!-- Display settings -->
   <div class="card">
-    <div class="card-title">Display</div>
+    <div class="card-title">Display — Landscape &amp; Dome</div>
     <div class="setting">
       <div>
         <div class="lbl">Max birds on screen</div>
@@ -449,7 +450,7 @@
           if (bird.bodyStrokes) {
             renderBirdThumbnail(entry.target, bird);
           } else {
-            db.ref('birds').child(key).once('value', snap => {
+            db.ref('v2/birds').child(key).once('value', snap => {
               const d = snap.val();
               if (d) {
                 bird.bodyStrokes = d.bodyStrokes || [];
@@ -491,14 +492,22 @@
     starBtn.className = 'star-btn' + (bird.starred ? ' starred' : '');
     starBtn.title = bird.starred ? 'Unstar' : 'Star';
     starBtn.textContent = bird.starred ? '★' : '☆';
-    starBtn.onclick = () => db.ref('birds').child(bird.key).update({ starred: !bird.starred });
+    starBtn.onclick = () => {
+      const newVal = !bird.starred;
+      db.ref('v2/birds').child(bird.key).update({ starred: newVal });
+      db.ref('v2/birds_meta').child(bird.key).update({ starred: newVal });
+    };
     row.appendChild(starBtn);
 
     const delBtn = document.createElement('button');
     delBtn.className = 'del-btn';
     delBtn.title = 'Delete this bird';
     delBtn.textContent = '✕';
-    delBtn.onclick = () => db.ref('birds').child(bird.key).remove();
+    delBtn.onclick = () => {
+      if (!confirm('Delete this bird?')) return;
+      db.ref('v2/birds').child(bird.key).remove();
+      db.ref('v2/birds_meta').child(bird.key).remove();
+    };
     row.appendChild(delBtn);
 
     return row;
@@ -512,9 +521,9 @@
   }
 
   // ---- Firebase bird listeners ----
-  // child_added: prepend each bird row as it arrives (Firebase sends oldest→newest,
-  // so prepending gives newest-first order without any sorting or full rebuild).
-  db.ref('birds').on('child_added', snap => {
+  // Read from birds_meta (lightweight: createdAt, density, starred only — no stroke data).
+  // child_added fires oldest→newest so prepending gives newest-first order.
+  db.ref('v2/birds_meta').limitToLast(500).on('child_added', snap => {
     const d = snap.val();
     const bird = {
       key: snap.key,
@@ -526,7 +535,6 @@
     updateStats();
 
     const list = document.getElementById('bird-list');
-    // Remove "no birds" placeholder if present
     const placeholder = list.querySelector('.no-birds');
     if (placeholder) placeholder.remove();
 
@@ -537,7 +545,7 @@
   });
 
   // child_removed: remove just that row, no full rebuild needed
-  db.ref('birds').on('child_removed', snap => {
+  db.ref('v2/birds_meta').on('child_removed', snap => {
     allBirds = allBirds.filter(b => b.key !== snap.key);
     updateStats();
     const row = document.querySelector(`.bird-row[data-key="${snap.key}"]`);
@@ -548,8 +556,8 @@
     }
   });
 
-  // child_changed: update just the star button in place, no full rebuild needed
-  db.ref('birds').on('child_changed', snap => {
+  // child_changed: update just the star button in place
+  db.ref('v2/birds_meta').on('child_changed', snap => {
     const d = snap.val();
     const idx = allBirds.findIndex(b => b.key === snap.key);
     if (idx === -1) return;
@@ -567,12 +575,42 @@
   document.getElementById('del-today').onclick = () => {
     if (!confirm("Delete all of today's birds?")) return;
     const ts = todayStart();
-    allBirds.filter(b => b.createdAt && b.createdAt >= ts)
-            .forEach(b => db.ref('birds').child(b.key).remove());
+    allBirds.filter(b => b.createdAt && b.createdAt >= ts).forEach(b => {
+      db.ref('v2/birds').child(b.key).remove();
+      db.ref('v2/birds_meta').child(b.key).remove();
+    });
   };
   document.getElementById('del-all').onclick = () => {
     if (!confirm('Delete ALL birds? This cannot be undone.')) return;
-    db.ref('birds').remove();
+    db.ref('v2/birds').remove();
+    db.ref('v2/birds_meta').remove();
+  };
+
+  // One-time migration: reads all full bird records and writes lightweight meta entries.
+  // Only needed once to backfill existing birds saved before birds_meta existed.
+  document.getElementById('migrate-meta').onclick = async () => {
+    if (!confirm('This will download all existing bird data once to build the fast index. Continue?')) return;
+    const btn = document.getElementById('migrate-meta');
+    btn.textContent = 'Migrating…';
+    btn.disabled = true;
+    try {
+      const snap = await db.ref('v2/birds').once('value');
+      const updates = {};
+      snap.forEach(child => {
+        const d = child.val();
+        updates[child.key] = {
+          createdAt: d.createdAt || 0,
+          density:   d.density   || 0,
+          starred:   d.starred   || false
+        };
+      });
+      await db.ref('v2/birds_meta').update(updates);
+      btn.textContent = 'Done ✓';
+      setTimeout(() => { btn.textContent = 'Rebuild index'; btn.disabled = false; }, 3000);
+    } catch(e) {
+      btn.textContent = 'Error — try again';
+      btn.disabled = false;
+    }
   };
 
   // ---- Background picker ----
@@ -649,7 +687,7 @@
 
   // ---- Save settings ----
   function saveSettings() {
-    db.ref('settings').update({
+    db.ref('v2/settings').update({
       maxBirds: parseInt(document.getElementById('max-birds').value) || 0,
       showOnlyToday: document.getElementById('today-only').checked,
       showOnlyFavorites: document.getElementById('favorites-only').checked,
@@ -664,7 +702,7 @@
   buildBgPicker(currentBg);
   buildPalettePicker(currentPalette);
 
-  db.ref('settings').once('value', snap => {
+  db.ref('v2/settings').once('value', snap => {
     const s = snap.val() || {};
     const newBg = s.background || 'hills';
     const newPalette = s.colorPalette || ["#bf1a2f","#05a8aa","#f58a07","#f4e409","#402039","#004f2d"];
@@ -683,8 +721,8 @@
   document.getElementById('today-only').onchange = saveSettings;
   document.getElementById('favorites-only').onchange = saveSettings;
 
-  // Hide loading bar once all initial bird data has arrived
-  db.ref('birds').once('value', () => {
+  // Dismiss load bar once the lightweight meta index responds (fast regardless of bird count)
+  db.ref('v2/birds_meta').once('value', () => {
     document.getElementById('load-bar').classList.add('done');
   });
 </script>

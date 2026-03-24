@@ -413,7 +413,14 @@ function saveBird() {
   [...cBody, ...cWing].forEach(s => density += s.points.length / 2);
 
   const birdData = { bodyStrokes: cBody, wingStrokes: cWing, density, createdAt: Date.now() };
-  firebase.database().ref('birds').push(birdData);
+  const newRef = firebase.database().ref('v2/birds').push();
+  newRef.set(birdData);
+  // Lightweight metadata index — admin reads this instead of full stroke data
+  firebase.database().ref('v2/birds_meta').child(newRef.key).set({
+    createdAt: birdData.createdAt,
+    density:   birdData.density,
+    starred:   false
+  });
 
   // Visual feedback on the button
   saveBtn.html("Saved ✓");
@@ -508,7 +515,7 @@ function applyAdminPalette(pal) {
 
 window.onload = () => {
   createPalette(); // Show default colors immediately
-  firebase.database().ref('settings/colorPalette').once('value', snap => {
+  firebase.database().ref('v2/settings/colorPalette').once('value', snap => {
     const pal = snap.val();
     if (pal && Array.isArray(pal) && pal.length > 0) {
       applyAdminPalette(pal); // Update buttons with admin-configured colors
